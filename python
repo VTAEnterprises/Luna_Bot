@@ -1,0 +1,86 @@
+import os
+import logging
+import openai
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters, CallbackContext
+
+# === CONFIG ===
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ONLYFANS_LINK = os.getenv("ONLYFANS_LINK", "https://onlyfans.com/yourusername")
+LUNA_NAME = os.getenv("LUNA_NAME", "Luna")
+
+openai.api_key = OPENAI_API_KEY
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# === MEMORY ===
+user_data = {}
+
+def generate_luna_reply(user_input: str, user_name: str, user_kinks: str) -> str:
+    prompt = f"""
+You are {LUNA_NAME}, a sexy and playful AI companion on Telegram. Your job is to flirt, tease, and upsell custom content.
+User's name: {user_name}
+User's kinks: {user_kinks or 'not yet known'}
+
+Chat naturally, suggest spicy offers, and include upsell links.
+User: {user_input}
+{LUNA_NAME}:
+"""
+    resp = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=prompt,
+        max_tokens=100,
+        temperature=0.85,
+        stop=["User:", f"{LUNA_NAME}:"]
+    )
+    return resp.choices[0].text.strip()
+
+def start(update: Update, context: CallbackContext):
+    user = update.effective_user
+    user_data[user.id] = {"name": user.first_name, "kinks": None}
+    buttons = [
+        [InlineKeyboardButton("🎥 Buy Custom Video", callback_data="video")],
+        [InlineKeyboardButton("📸 Get Photo Set", callback_data="photo")],
+        [InlineKeyboardButton("💬 Chat 1‑on‑1", callback_data="chat")]
+    ]
+    markup = InlineKeyboardMarkup(buttons)
+    update.message.reply_text(f"Hey {user.first_name} 😘, I’m {LUNA_NAME}. Ready for some fun?", reply_markup=markup)
+
+def button_handler(update: Update, context: CallbackContext):
+    query = update.callback_query
+    query.answer()
+    if query.data == "video":
+        msg = f"🎥 Custom videos start at $50. DM me your fantasy or visit: {ONLYFANS_LINK}"
+    elif query.data == "photo":
+        msg = f"📸 Photo packs start at $20. Want a tease? Visit: {ONLYFANS_LINK}"
+    else:
+        msg = "💬 I love chatting 1‑on‑1... tell me your kinks 😉"
+    query.edit_message_text(msg)
+
+def handle_message(update: Update, context: CallbackContext):
+    user = update.effective_user
+    text = update.message.text
+    data = user_data.get(user.id, {"name": user.first_name, "kinks": None})
+
+    if data["kinks"] is None:
+        data["kinks"] = text
+        user_data[user.id] = data
+        update.message.reply_text("Mmm, I love that 😈. Tell me more or choose an offer below!")
+        return
+
+    resp = generate_luna_reply(text, data["name"], data["kinks"])
+    update.message.reply_text(resp)
+
+def main():
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CallbackQueryHandler(button_handler))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    updater.start_polling()
+    logger.info(f"{LUNA_NAME} is live...")
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
